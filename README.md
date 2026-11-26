@@ -9,4 +9,4 @@ Objectifs :
 - alléger la charge cognitive pour que l'enfant se concentre sur le sens et le plaisir de comprendre ;
 - favoriser l'inclusion, en suivant le même rythme que les camarades.
 
-Le projet est en cours de construction.
+Le projet est en cours de construction. Voir [docs/architecture.md](docs/architecture.md) et [backend/README.md](backend/README.md).
