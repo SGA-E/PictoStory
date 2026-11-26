@@ -13,7 +13,7 @@ from .pictograms import ArasaacProvider
 def main() -> None:
     parser = argparse.ArgumentParser(description="Annoter une histoire avec des pictogrammes.")
     parser.add_argument("fichier", type=Path, help="fichier texte (.txt) ou image (.jpg, .png)")
-    parser.add_argument("--personnage", action="append", default=[], help="nom d'un personnage connu")
+    parser.add_argument("--personnage", action="append", default=[], help='personnage connu, ex. "Blanquette: chèvre, coureuse"')
     parser.add_argument("--json", action="store_true", help="sortie JSON complète")
     args = parser.parse_args()
 

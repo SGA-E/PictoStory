@@ -17,11 +17,14 @@ Pour lire des photos : installer [Tesseract](https://github.com/tesseract-ocr/te
 ## Utilisation
 
 ```bash
-pictostory mon_histoire.txt --personnage Max
+pictostory mon_histoire.txt --personnage "Blanquette: chèvre, coureuse" --personnage "monsieur Seguin"
 pictostory page.jpg            # photo d'une page, passe par l'OCR
 uvicorn pictostory.api:app     # API locale sur http://127.0.0.1:8000/docs
 pytest                         # tests
+python -m pictostory.evaluate dossier_corpus   # score sur un corpus annoté à la main
 ```
+
+Un personnage se déclare par son nom, suivi si besoin des noms communs qui le désignent aussi dans l'histoire : `"Blanquette: chèvre, coureuse"`. Le format du corpus d'évaluation est décrit dans `evaluate.py`.
 
 ## Organisation
 
@@ -31,6 +34,7 @@ pytest                         # tests
 | `ocr.py` | Lecture du texte d'une photo (Tesseract) |
 | `nlp.py` | spaCy : personnages et reprises par règles simples |
 | `pictograms.py` | Recherche des pictogrammes ARASAAC, avec cache local pour travailler hors ligne |
+| `evaluate.py` | Score de la résolution des reprises sur un corpus annoté |
 | `wsd.py` | Choix du bon pictogramme selon le contexte (version de base sans IA pour l'instant) |
 | `annotate.py` | Enchaîne toutes les étapes |
 | `api.py`, `cli.py` | API locale et ligne de commande |

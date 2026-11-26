@@ -31,6 +31,8 @@ class Character:
     id: str
     name: str
     gender: str | None = None  # "Masc", "Fem" ou None
+    number: str | None = None  # "Sing", "Plur" ou None
+    aliases: list[str] = field(default_factory=list)  # autres noms : « chèvre », « coureuse »
 
 
 @dataclass
