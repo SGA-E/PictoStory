@@ -47,6 +47,7 @@ class Token:
     confidence: float = 0.0
     to_validate: bool = False
     character_id: str | None = None  # renseigné si le mot désigne un personnage
+    referent: str | None = None  # pronom qui renvoie à une chose : lemme du nom (« herbe »)
 
 
 @dataclass

@@ -15,6 +15,7 @@ def main() -> None:
     parser.add_argument("fichier", type=Path, help="fichier texte (.txt) ou image (.jpg, .png)")
     parser.add_argument("--personnage", action="append", default=[], help='personnage connu, ex. "Blanquette: chèvre, coureuse"')
     parser.add_argument("--json", action="store_true", help="sortie JSON complète")
+    parser.add_argument("--llm", metavar="MODELE", help="modèle Ollama local pour les reprises difficiles, ex. qwen2.5:7b")
     args = parser.parse_args()
 
     if args.fichier.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif", ".tiff"}:
@@ -24,7 +25,12 @@ def main() -> None:
     else:
         text = args.fichier.read_text(encoding="utf-8")
 
-    story = annotate_story(text, ArasaacProvider(), known_characters=args.personnage)
+    llm = None
+    if args.llm:
+        from .coref_llm import OllamaLLM
+
+        llm = OllamaLLM(args.llm)
+    story = annotate_story(text, ArasaacProvider(), known_characters=args.personnage, llm=llm)
 
     if args.json:
         print(json.dumps(story.to_dict(), ensure_ascii=False, indent=2))
@@ -38,6 +44,8 @@ def main() -> None:
             mark = ""
             if t.character_id:
                 mark = f"[{names[t.character_id]}]"
+            elif t.referent:
+                mark = f"[→ {t.referent}]"
             elif t.pictogram:
                 mark = f"[#{t.pictogram.id}{' ?' if t.to_validate else ''}]"
             parts.append(t.text + mark)

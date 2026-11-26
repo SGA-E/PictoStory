@@ -49,8 +49,16 @@ class ArasaacProvider:
         if path.exists():
             return json.loads(path.read_text(encoding="utf-8"))
         url = f"{ARASAAC_API}/pictograms/{self.lang}/bestsearch/{lemma}"
-        response = self.client.get(url)
-        data = response.json() if response.status_code == 200 else []
+        try:
+            response = self.client.get(url)
+        except httpx.HTTPError:
+            return []  # hors ligne : pas de picto, et rien en cache pour réessayer plus tard
+        if response.status_code == 404:
+            data = []  # aucun picto pour ce mot : on le retient
+        elif response.status_code == 200:
+            data = response.json()
+        else:
+            return []
         path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         return data
 

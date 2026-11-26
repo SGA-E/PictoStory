@@ -26,6 +26,14 @@ CONTENT_POS = {"NOUN", "PROPN", "VERB", "ADJ"}
 # Pronoms de 3e personne que l'on cherche à relier à un personnage.
 THIRD_PERSON_PRONOUNS = {"il", "elle", "ils", "elles", "le", "la", "l'", "les", "lui", "leur"}
 
+# Pronoms de 1re personne : dans un dialogue, ils désignent celui qui parle.
+FIRST_PERSON_PRONOUNS = {"je", "j'", "me", "m'", "moi"}
+
+# Verbes qui introduisent une parole : « elle dit à monsieur Seguin : »
+SPEECH_VERBS = {"dire", "demander", "répondre", "crier", "écrier", "murmurer", "ajouter", "penser", "chuchoter", "hurler"}
+
+DIALOGUE_DASHES = {"-", "–", "—", "«"}
+
 # Verbes impersonnels : dans « il faut », « il pleut », « il y a », « il » ne désigne personne.
 IMPERSONAL_VERBS = {"falloir", "pleuvoir", "neiger", "venter", "agir", "avoir"}
 
@@ -55,7 +63,7 @@ def load_nlp(model: str = DEFAULT_MODEL) -> Language:
 
 def add_known_characters(nlp: Language, known: list[KnownCharacter]) -> None:
     """Ajoute les noms propres des personnages connus au repérage d'entités."""
-    names = [k.name for k in known if k.name[:1].isupper()]
+    names = [k.name for k in known if any(w[:1].isupper() for w in k.name.split())]
     if not names:
         return
     if "entity_ruler" in nlp.pipe_names:
@@ -92,12 +100,15 @@ def find_characters(
     for k in known or []:
         cid = _slug(k.name)
         characters[cid] = Character(id=cid, name=k.name, aliases=list(k.aliases))
-        for alias in k.aliases + ([k.name.lower()] if k.name[:1].islower() else []):
+        is_common_noun = not any(w[:1].isupper() for w in k.name.split())
+        for alias in k.aliases + ([k.name.lower()] if is_common_noun else []):
             alias_to_char[alias] = cid
 
     for ent in doc.ents:
         if ent.label_ != "PER":
             continue
+        if ent.start > 0 and doc[ent.start - 1].text in {"«", '"'}:
+            continue  # un mot entre guillemets (« Mê… ») n'est pas un personnage
         cid = _slug(ent.text)
         char = characters.setdefault(cid, Character(id=cid, name=ent.text))
         char.gender = char.gender or _morph(ent.root, "Gender")
@@ -172,4 +183,34 @@ def resolve_pronouns(doc: Doc, characters: list[Character], token_to_char: dict[
         target = next((cid for cid in recent if compatible(cid)), None)
         if target:
             resolved[tok.i] = target
+    return resolved
+
+
+def dialogue_tokens(doc: Doc) -> set[int]:
+    """Indices des tokens qui sont dans une réplique : de « - » en début de ligne jusqu'à la fin de la ligne."""
+    inside, in_dialogue = set(), False
+    for tok in doc:
+        at_line_start = tok.i == 0 or "\n" in doc[tok.i - 1].text or doc[tok.i - 1].text_with_ws.endswith("\n")
+        if at_line_start:
+            in_dialogue = tok.text in DIALOGUE_DASHES
+        if "\n" in tok.text:
+            in_dialogue = False
+            continue
+        if in_dialogue:
+            inside.add(tok.i)
+    return inside
+
+
+def resolve_speakers(doc: Doc, references: dict[int, str]) -> dict[int, str]:
+    """Relie « je », « me », « moi » d'une réplique au personnage qui vient de prendre la parole."""
+    resolved = dict(references)
+    in_dialogue = dialogue_tokens(doc)
+    speaker: str | None = None
+    for tok in doc:
+        if tok.i not in in_dialogue and tok.lemma_ in SPEECH_VERBS:
+            subject = next((c for c in tok.children if c.dep_.startswith("nsubj")), None)
+            if subject is not None and subject.i in resolved:
+                speaker = resolved[subject.i]
+        if tok.i in in_dialogue and tok.text.lower() in FIRST_PERSON_PRONOUNS and speaker:
+            resolved[tok.i] = speaker
     return resolved
