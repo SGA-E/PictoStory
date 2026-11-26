@@ -15,11 +15,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+import json
+import logging
+
 import httpx
 from spacy.tokens import Doc
 
 from .models import Character
 from .nlp import FIRST_PERSON_PRONOUNS, THIRD_PERSON_PRONOUNS, _is_impersonal, _morph, dialogue_tokens
+
+log = logging.getLogger(__name__)
 
 DEFAULT_OLLAMA_MODEL = "qwen2.5:7b"
 CONTEXT_SENTENCES = 2  # phrases précédentes montrées au LLM
@@ -38,10 +43,27 @@ class ChoiceLLM(Protocol):
 
 
 class OllamaLLM:
-    def __init__(self, model: str = DEFAULT_OLLAMA_MODEL, url: str = "http://localhost:11434", timeout: float = 120.0):
+    """Client Ollama.
+
+    `cpu_only=True` force le calcul sur le processeur : utile quand la carte
+    graphique est trop ancienne pour Ollama (erreur CUDA, réponses HTTP 500).
+    Les échecs sont comptés dans `errors` et signalés dans le journal, pour ne
+    pas croire à tort que le LLM a été utilisé.
+    """
+
+    def __init__(
+        self,
+        model: str = DEFAULT_OLLAMA_MODEL,
+        url: str = "http://localhost:11434",
+        timeout: float = 120.0,
+        cpu_only: bool = False,
+    ):
         self.model = model
         self.url = url.rstrip("/")
         self.client = httpx.Client(timeout=timeout)
+        self.cpu_only = cpu_only
+        self.calls = 0
+        self.errors: list[str] = []
 
     def choose(self, prompt: str, n_choices: int) -> int | None:
         schema = {
@@ -49,6 +71,10 @@ class OllamaLLM:
             "properties": {"choix": {"type": "integer", "minimum": 1, "maximum": n_choices}},
             "required": ["choix"],
         }
+        options = {"temperature": 0}
+        if self.cpu_only:
+            options["num_gpu"] = 0
+        self.calls += 1
         try:
             response = self.client.post(
                 f"{self.url}/api/chat",
@@ -60,16 +86,32 @@ class OllamaLLM:
                     ],
                     "format": schema,
                     "stream": False,
-                    "options": {"temperature": 0},
+                    "options": options,
                 },
             )
             response.raise_for_status()
-            import json
-
             value = json.loads(response.json()["message"]["content"]).get("choix")
-        except (httpx.HTTPError, ValueError, KeyError):
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text[:300]
+            self._fail(f"HTTP {exc.response.status_code} : {detail}")
+            return None
+        except (httpx.HTTPError, ValueError, KeyError) as exc:
+            self._fail(f"{type(exc).__name__} : {exc}")
             return None
         return value if isinstance(value, int) and 1 <= value <= n_choices else None
+
+
+    def _fail(self, message: str) -> None:
+        self.errors.append(message)
+        if len(self.errors) == 1:
+            hint = ""
+            if "CUDA" in message or "llama-server" in message:
+                hint = " Essayez le mode processeur (--llm-cpu) ou mettez à jour le pilote de la carte graphique."
+            log.warning("Ollama ne répond pas correctement, les règles sont gardées. %s%s", message, hint)
+
+    def summary(self) -> str:
+        ok = self.calls - len(self.errors)
+        return f"LLM {self.model} : {ok}/{self.calls} réponses utilisables"
 
 
 @dataclass
@@ -163,18 +205,19 @@ def refine_with_llm(
         word = tok.text.lower()
         third = tok.pos_ == "PRON" and word in THIRD_PERSON_PRONOUNS and not _is_impersonal(tok)
         first = word in FIRST_PERSON_PRONOUNS and tok.i in in_dialogue and tok.i not in references
-        generic_on = word == "on"
-        if not (third or first or generic_on):
-            continue
+        if not (third or first):
+            continue  # « on » n'est pas soumis au LLM : il reste générique
 
         options = build_options(doc, tok, characters, seen, token_to_char)
-        if len(options) <= 2 and not generic_on and tok.i in references:
+        if len(options) <= 2 and tok.i in references:
             continue  # un seul référent possible : les règles suffisent
 
         choice = llm.choose(build_prompt(doc, tok, options), len(options))
         if choice is None:
             continue
         picked = options[choice - 1]
+        if picked is GENERIC and tok.i in references:
+            continue  # « sens général » ne remplace pas un personnage trouvé par les règles
         references.pop(tok.i, None)
         if picked.character_id:
             references[tok.i] = picked.character_id
