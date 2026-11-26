@@ -12,11 +12,10 @@ et `nom.json` (les réponses attendues) :
       ]
     }
 
-`attendu` est l'identifiant du personnage, un mot qui n'est pas un personnage
-(le pipeline doit alors ne relier le pronom à aucun personnage), ou null pour
-un pronom générique.
+`attendu` est l'identifiant du personnage, le lemme d'un nom qui n'est pas un
+personnage (« herbe »), ou null pour un pronom générique.
 
-Lancement : `python -m pictostory.evaluate chemin/du/corpus`
+Lancement : `python -m pictostory.evaluate chemin/du/corpus [--llm qwen2.5:7b]`
 """
 
 from __future__ import annotations
@@ -26,11 +25,14 @@ import json
 from pathlib import Path
 
 from .annotate import annotate_story
+from .coref_llm import ChoiceLLM, OllamaLLM
 from .pictograms import InMemoryProvider
 
 
-def evaluate_story(text: str, gold: dict) -> list[dict]:
-    story = annotate_story(text, InMemoryProvider(), known_characters=gold.get("personnages", []))
+def evaluate_story(text: str, gold: dict, llm: ChoiceLLM | None = None) -> list[dict]:
+    story = annotate_story(
+        text, InMemoryProvider(), known_characters=gold.get("personnages", []), llm=llm
+    )
     character_ids = {c.id for c in story.characters}
     results = []
     for item in gold["reprises"]:
@@ -40,32 +42,30 @@ def evaluate_story(text: str, gold: dict) -> list[dict]:
         token = None
         if sentence:
             token = next((t for t in sentence.tokens if t.text == item["mot"]), None)
-        got = token.character_id if token else None
+        got = (token.character_id or token.referent) if token else None
         expected = item["attendu"]
-        # Un référent qui n'est pas un personnage (« herbe ») attend « aucun personnage ».
-        expected_char = expected if expected in character_ids else None
-        results.append(
-            {
-                **item,
-                "obtenu": got,
-                "trouve": token is not None,
-                "correct": token is not None and got == expected_char,
-            }
-        )
+        if expected in character_ids or expected is None:
+            correct = token is not None and token.character_id == expected and token.referent is None
+        else:
+            # Référent qui n'est pas un personnage (« herbe ») : il faut le trouver.
+            correct = token is not None and token.character_id is None and token.referent == expected
+        results.append({**item, "obtenu": got, "trouve": token is not None, "correct": correct})
     return results
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Évaluer la résolution des reprises.")
     parser.add_argument("corpus", type=Path)
+    parser.add_argument("--llm", metavar="MODELE", help="modèle Ollama à utiliser, ex. qwen2.5:7b")
     args = parser.parse_args()
+    llm = OllamaLLM(args.llm) if args.llm else None
 
     total = correct = 0
     for gold_path in sorted(args.corpus.glob("*.json")):
         text = gold_path.with_suffix(".txt").read_text(encoding="utf-8")
         gold = json.loads(gold_path.read_text(encoding="utf-8"))
         print(f"\n== {gold_path.stem}")
-        for r in evaluate_story(text, gold):
+        for r in evaluate_story(text, gold, llm):
             total += 1
             correct += r["correct"]
             mark = "OK " if r["correct"] else "NON"
