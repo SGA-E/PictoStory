@@ -62,3 +62,45 @@ def test_je_dans_un_dialogue_est_celui_qui_parle():
 def test_ollama_absent_ne_bloque_pas():
     llm = OllamaLLM(url="http://127.0.0.1:9", timeout=0.5)
     assert llm.choose("question", 3) is None
+
+
+@pytest.mark.needs_model
+def test_sens_general_ne_remplace_pas_un_personnage_trouve():
+    text = "Ruset sort du terrier. Les renardeaux le suivent."
+    llm = FakeLLM({"[[le]]": "sens général"})
+    story = annotate_story(
+        text, InMemoryProvider(), known_characters=["Ruset", "renardeaux: renardeau"], llm=llm
+    )
+    (le,) = tokens(story, "le")
+    assert le.character_id == "ruset"
+
+
+@pytest.mark.needs_model
+def test_on_n_est_pas_soumis_au_llm():
+    llm = FakeLLM({"[[on]]": "Blanquette"})
+    story = annotate_story(
+        "Blanquette regarde la montagne. Comme on doit être bien là-haut !",
+        InMemoryProvider(),
+        known_characters=["Blanquette"],
+        llm=llm,
+    )
+    (on,) = tokens(story, "on")
+    assert on.character_id is None
+    assert not any("[[on]]" in p for p in llm.prompts)
+
+
+def test_erreur_ollama_comptee_et_mode_processeur():
+    import httpx
+
+    sent = []
+
+    def handler(request):
+        sent.append(request.content)
+        return httpx.Response(500, text="CUDA error: unsupported toolchain")
+
+    llm = OllamaLLM(cpu_only=True)
+    llm.client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert llm.choose("question", 3) is None
+    assert llm.calls == 1 and "CUDA" in llm.errors[0]
+    assert b'"num_gpu": 0' in sent[0] or b'"num_gpu":0' in sent[0]
+    assert llm.summary().endswith("0/1 réponses utilisables")

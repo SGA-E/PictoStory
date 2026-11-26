@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import json
 from pathlib import Path
 
@@ -16,7 +17,9 @@ def main() -> None:
     parser.add_argument("--personnage", action="append", default=[], help='personnage connu, ex. "Blanquette: chèvre, coureuse"')
     parser.add_argument("--json", action="store_true", help="sortie JSON complète")
     parser.add_argument("--llm", metavar="MODELE", help="modèle Ollama local pour les reprises difficiles, ex. qwen2.5:7b")
+    parser.add_argument("--llm-cpu", action="store_true", help="forcer Ollama à calculer sur le processeur")
     args = parser.parse_args()
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
     if args.fichier.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif", ".tiff"}:
         from .ocr import image_to_text
@@ -29,8 +32,13 @@ def main() -> None:
     if args.llm:
         from .coref_llm import OllamaLLM
 
-        llm = OllamaLLM(args.llm)
+        llm = OllamaLLM(args.llm, cpu_only=args.llm_cpu)
     story = annotate_story(text, ArasaacProvider(), known_characters=args.personnage, llm=llm)
+
+    if llm is not None:
+        import sys
+
+        print(llm.summary(), file=sys.stderr)
 
     if args.json:
         print(json.dumps(story.to_dict(), ensure_ascii=False, indent=2))

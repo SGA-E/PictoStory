@@ -12,8 +12,9 @@ et `nom.json` (les réponses attendues) :
       ]
     }
 
-`attendu` est l'identifiant du personnage, le lemme d'un nom qui n'est pas un
-personnage (« herbe »), ou null pour un pronom générique.
+`attendu` est l'identifiant du personnage, le lemme (forme au singulier) d'un
+nom qui n'est pas un personnage (« herbe », « fleur »), ou null pour un
+pronom générique.
 
 Lancement : `python -m pictostory.evaluate chemin/du/corpus [--llm qwen2.5:7b]`
 """
@@ -21,6 +22,7 @@ Lancement : `python -m pictostory.evaluate chemin/du/corpus [--llm qwen2.5:7b]`
 from __future__ import annotations
 
 import argparse
+import logging
 import json
 from pathlib import Path
 
@@ -57,8 +59,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Évaluer la résolution des reprises.")
     parser.add_argument("corpus", type=Path)
     parser.add_argument("--llm", metavar="MODELE", help="modèle Ollama à utiliser, ex. qwen2.5:7b")
+    parser.add_argument("--llm-cpu", action="store_true", help="forcer Ollama à calculer sur le processeur")
     args = parser.parse_args()
-    llm = OllamaLLM(args.llm) if args.llm else None
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")
+    llm = OllamaLLM(args.llm, cpu_only=args.llm_cpu) if args.llm else None
 
     total = correct = 0
     for gold_path in sorted(args.corpus.glob("*.json")):
@@ -73,6 +77,8 @@ def main() -> None:
             print(f"  {mark} « {r['mot']} » dans « {r['phrase']}… » : attendu {r['attendu']}, obtenu {r['obtenu']}{found}")
     if total:
         print(f"\nScore : {correct}/{total} ({100 * correct / total:.0f} %)")
+    if llm is not None:
+        print(llm.summary())
 
 
 if __name__ == "__main__":
