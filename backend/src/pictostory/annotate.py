@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 from .models import Sentence, Story, Token
-from .nlp import CONTENT_POS, add_known_characters, find_characters, load_nlp, resolve_pronouns
+from .nlp import (
+    CONTENT_POS,
+    KnownCharacter,
+    add_known_characters,
+    find_characters,
+    load_nlp,
+    resolve_pronouns,
+)
 from .pictograms import PictogramProvider
 from .wsd import CONFIDENCE_THRESHOLD, BaselineDisambiguator, Disambiguator
 
@@ -16,11 +23,12 @@ def annotate_story(
     model: str | None = None,
 ) -> Story:
     nlp = load_nlp(model) if model else load_nlp()
-    add_known_characters(nlp, known_characters or [])
+    known = [KnownCharacter.parse(k) for k in known_characters or []]
+    add_known_characters(nlp, known)
     disambiguator = disambiguator or BaselineDisambiguator()
 
     doc = nlp(text)
-    characters, token_to_char = find_characters(doc)
+    characters, token_to_char = find_characters(doc, known)
     references = resolve_pronouns(doc, characters, token_to_char)
 
     sentences = []
